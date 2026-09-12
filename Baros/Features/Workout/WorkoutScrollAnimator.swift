@@ -13,9 +13,6 @@ final class WorkoutScrollAnimator {
     private struct Request {
         let id = UUID()
         let field: WorkoutField
-        let anchor: UnitPoint
-        let deadline: CFTimeInterval
-        let targetY: CGFloat
     }
 
     private var targets: [AnyHashable: WeakView] = [:]
@@ -30,17 +27,6 @@ final class WorkoutScrollAnimator {
 
     func unregister(_ view: UIView, for field: AnyHashable) {
         if targets[field]?.view === view { targets[field] = nil }
-    }
-
-    @discardableResult
-    func reveal(_ field: WorkoutField, anchor: UnitPoint) -> Bool {
-        animate(field, anchor: anchor, deadline: CACurrentMediaTime() + 0.25, flush: true)
-    }
-
-    func viewportDidChange() {
-        guard let request, let destination = destination(for: request.field, anchor: request.anchor),
-              abs(destination.y - request.targetY) > 0.5 else { return }
-        _ = animate(request.field, anchor: request.anchor, deadline: request.deadline, flush: false)
     }
 
     func focusDidChange(to field: WorkoutField?) {
@@ -74,12 +60,13 @@ final class WorkoutScrollAnimator {
         return (scroll, min(maximum, max(minimum, y)))
     }
 
-    private func animate(_ field: WorkoutField, anchor: UnitPoint, deadline: CFTimeInterval, flush: Bool) -> Bool {
+    @discardableResult
+    func reveal(_ field: WorkoutField, anchor: UnitPoint) -> Bool {
         guard let destination = destination(for: field, anchor: anchor) else { return false }
         cancel()
         let scroll = destination.scroll
         scrollView = scroll
-        let next = Request(field: field, anchor: anchor, deadline: deadline, targetY: destination.y)
+        let next = Request(field: field)
         request = next
 
         guard !UIAccessibility.isReduceMotionEnabled, abs(scroll.contentOffset.y - destination.y) > 0.5 else {
@@ -87,7 +74,7 @@ final class WorkoutScrollAnimator {
             return true
         }
 
-        let animation = UIViewPropertyAnimator(duration: max(0.06, deadline - CACurrentMediaTime()), curve: .easeInOut) { [weak scroll] in
+        let animation = UIViewPropertyAnimator(duration: 0.25, curve: .easeInOut) { [weak scroll] in
             guard let scroll else { return }
             scroll.contentOffset.y = destination.y
         }
@@ -97,19 +84,12 @@ final class WorkoutScrollAnimator {
             self.animator = nil
         }
         animation.startAnimation()
-        if flush {
-            // Submit the animation before assigning focus. UIKit then sees the
-            // destination as visible, and the compositor can keep scrolling
-            // while SwiftUI processes the departing field's model update.
-            CATransaction.flush()
-        }
+        // Submit before assigning focus so text commits cannot stall the motion.
+        // Keep this destination for the whole arrow transition. Re-centering as
+        // the text/number keyboards resize creates a second, reversing scroll.
+        CATransaction.flush()
         return true
     }
-}
-
-struct WorkoutScrollViewport: Equatable {
-    let size: CGSize
-    let insets: EdgeInsets
 }
 
 private struct WorkoutScrollAnimatorKey: EnvironmentKey {

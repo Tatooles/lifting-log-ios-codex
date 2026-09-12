@@ -16,20 +16,6 @@ final class WorkoutScrollAnimatorTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, 372, accuracy: 0.5)
     }
 
-    func testKeyboardResizeRetargetsTheCurrentField() {
-        let (scroll, marker) = makeScroll(markerY: 600)
-        let animator = WorkoutScrollAnimator()
-        let field = WorkoutField.setWeight(UUID())
-        animator.register(marker, for: field)
-        defer { animator.cancel() }
-        animator.reveal(field, anchor: .center)
-
-        scroll.bounds.size.height = 560
-        animator.viewportDidChange()
-
-        XCTAssertEqual(scroll.contentOffset.y, 332, accuracy: 0.5)
-    }
-
     func testRevealClampsToTheScrollableRange() {
         let (scroll, marker) = makeScroll(markerY: 0)
         let animator = WorkoutScrollAnimator()
@@ -59,24 +45,32 @@ final class WorkoutScrollAnimatorTests: XCTestCase {
         XCTAssertEqual(scroll.contentOffset.y, 472, accuracy: 0.5)
     }
 
-    func testDismissalAndManualFocusCancelFutureViewportCorrections() {
-        for nextFocus in [nil, WorkoutField.workoutTitle] {
-            let (scroll, marker) = makeScroll(markerY: 600)
-            let animator = WorkoutScrollAnimator()
-            let field = WorkoutField.setWeight(UUID())
-            animator.register(marker, for: field)
-            animator.reveal(field, anchor: .center)
-            animator.focusDidChange(to: nextFocus)
-            scroll.contentOffset.y = 200
+    func testManualFocusCancelsAnInFlightScrollAtItsVisiblePosition() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 480)
+        let (scroll, marker) = makeScroll(markerY: 600)
+        window.addSubview(scroll)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        scroll.contentOffset.y = 100
+        CATransaction.flush()
+        let animator = WorkoutScrollAnimator()
+        let field = WorkoutField.setWeight(UUID())
+        animator.register(marker, for: field)
+        animator.reveal(field, anchor: .center)
+        try await Task.sleep(for: .milliseconds(80))
 
-            scroll.bounds.size.height = 560
-            animator.viewportDidChange()
-
-            XCTAssertEqual(scroll.contentOffset.y, 200, accuracy: 0.5)
-        }
+        animator.focusDidChange(to: .workoutTitle)
+        let stoppedOffset = scroll.contentOffset.y
+        XCTAssertGreaterThan(stoppedOffset, 100)
+        XCTAssertLessThan(stoppedOffset, 370, "Cancellation must not jump to the animation's destination")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(scroll.contentOffset.y, stoppedOffset, accuracy: 0.5)
     }
 
-    func testNewNavigationOwnsSubsequentViewportCorrections() {
+    func testNewNavigationUsesTheLatestTarget() {
         let (scroll, first) = makeScroll(markerY: 600)
         let second = UIView(frame: CGRect(x: 40, y: 700, width: 80, height: 44))
         scroll.addSubview(second)
@@ -89,10 +83,7 @@ final class WorkoutScrollAnimatorTests: XCTestCase {
         animator.reveal(firstField, anchor: .center)
         animator.reveal(secondField, anchor: .center)
 
-        scroll.bounds.size.height = 560
-        animator.viewportDidChange()
-
-        XCTAssertEqual(scroll.contentOffset.y, 432, accuracy: 0.5)
+        XCTAssertEqual(scroll.contentOffset.y, 472, accuracy: 0.5)
     }
 
     func testMissingTargetsFallBackWithoutChangingScrollPosition() {

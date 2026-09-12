@@ -168,11 +168,6 @@ struct WorkoutSessionView: View {
                 }
                 .equatable()
             }
-            .onScrollGeometryChange(for: WorkoutScrollViewport.self) {
-                WorkoutScrollViewport(size: $0.containerSize, insets: $0.contentInsets)
-            } action: { _, _ in
-                scrollAnimator.viewportDidChange()
-            }
             .onDisappear { scrollAnimator.cancel() }
             .onScrollPhaseChange { _, phase in
                 if phase == .tracking || phase == .interacting {
